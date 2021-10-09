@@ -1,9 +1,15 @@
-import FinanceCalculator as fc
+import FinancialCalculator as fc
 
 class PersonalFinances(object):
-    def __init__(self, accounts=[], initial_income = 0, initial_expense = 0, 
-                 income_tax = None, fica_taxes = None, age = 18, 
-                 income_growth = 0, expense_growth = 0):
+    def __init__(self, 
+                 accounts=[],
+                 initial_income = 0, 
+                 initial_expense = 0, 
+                 income_tax=None, 
+                 fica_taxes = None, 
+                 age = 18, 
+                 income_growth = 0, 
+                 expense_growth = 0):
         """
         
         Parameters
