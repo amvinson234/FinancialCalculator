@@ -12,7 +12,10 @@ class Tax(object):
         self._brackets_rate = brackets_rate
     
     def SetStandardDeduction(self, deduction):
-        self._deduction = deduction
+        if deduction is None:
+            self._deduction = 0
+        else:
+            self._deduction = deduction
         
     def GetTax(self, amount=0, deduction=None):
         if deduction is None:
@@ -59,3 +62,4 @@ ca_tax_bracket = {8809:.01, 20883:.02, 32960:.04, 45753:.06, 57824:.08, 295373:.
 fed_tax = Tax(fed_tax_bracket, 12550)
 ca_tax = Tax(ca_tax_bracket, 4601)
 fed_ca_tax = CombineTax([fed_tax, ca_tax])
+fica_tax = Tax({np.inf:0.0765})
