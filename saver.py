@@ -18,6 +18,7 @@ class Saver(object):
         self._employer_contribution_rate = None
     
         self.SetAPR(apr)
+        self.SetContributionCap(contribution_cap)
         self.SetPersonalContribution(personal_base_contribution, personal_contribution_rate)
         self.SetEmployerContributionRate(employer_contribution_rate)
         self.SetAccountType(account_type)
@@ -29,6 +30,9 @@ class Saver(object):
     
     def GetAPR(self):
         return self._apr
+    
+    def GetContributionCap(self):
+        return self._contribution_cap()
     
     def GetAccountAge(self):
         return self._account_age
@@ -64,6 +68,9 @@ class Saver(object):
     
     def SetAPR(self, apr):
         self._apr = apr
+        
+    def SetContributionCap(self, contribution_cap):
+        self._contribution_cap = contribution_cap
     
     def SetTaxObject(self, tax):
         self._tax = tax
