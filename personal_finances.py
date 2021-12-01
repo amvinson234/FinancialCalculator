@@ -172,4 +172,4 @@ class PersonalFinances(object):
         self._accounts[account_key].Contribute(amount)
         
     def Withdraw(self, account_key, amount = None):
-        self._accounts[account_key].Withdraw(amount)
+        return self._accounts[account_key].Withdraw(amount)
