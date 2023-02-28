@@ -1,6 +1,29 @@
 import FinancialCalculator as fc
 
 class Saver(object):
+    """_summary_
+
+    Parameters
+    ----------
+    initial_value : float, optional
+        initial dollar value in account, by default 0
+    personal_base_contribution : float, optional
+        base contribution value that user will contribute each year, by default 0
+    yearly_withdrawal : float, optional
+        how much value that user will extract from the account each year, by default 0
+    personal_contribution_rate : float, optional
+        contribution rate of user, as a fraction of yearly income, by default 0
+    contribution_cap : float, optional
+        yearly contribution cap, by default None
+    apr : float, optional
+        rate of growth as fraction of total account value per year, by default 0
+    tax : Tax, optional
+        tax object which dictates tax rates at different withdrawal amounts, by default None
+    account_type : optional
+        not really used (right now?), by default None
+    employer_contribution_rate : float, optional
+        emoloyer contribution rate as fraction of user's income, by default None
+    """
     def __init__(self, initial_value=0, personal_base_contribution=0, yearly_withdrawal=0, 
                  personal_contribution_rate = 0, contribution_cap = None,
                  apr = 0, tax = None, account_type = None, employer_contribution_rate = None):
