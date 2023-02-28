@@ -56,11 +56,23 @@ class CombineTax(Tax):
     def GetEffectiveTaxRate(self, amount=None):
         return self.GetTax(amount) / amount
 
-fed_tax_bracket = {9950:.10, 40525:.12, 86375:.22, 164925:.24, 209425:.32, 523600:.35, np.inf:.37}
-ca_tax_bracket = {8809:.01, 20883:.02, 32960:.04, 45753:.06, 57824:.08, 295373:.093, 354445:.103, 590742:.113, 1000000:.123, np.inf:.133}
+fed_tax_bracket = {10275:.10, 41775:.12, 89075:.22, 170050:.24, 215950:.32, 539900:.35, np.inf:.37}
+ca_tax_bracket = {10099:.01, 23942:.02, 37788:.04, 52455:.06, 66295:.08, 338639:.093, 406364:.103, 677275:.113, np.inf:.123}
+fed_tax_bracket_married = {2*key: fed_tax_bracket[key] for key in fed_tax_bracket}
+fed_tax_bracket_married.pop(539900*2)
+fed_tax_bracket_married[647850] = .35 #for some reason this bracket doesn't follow doubling pattern...
+ftbm_keys = list(fed_tax_bracket_married.keys())
+ftbm_keys.sort()
+fed_tax_bracket_married = {ftbm_key: fed_tax_bracket_married[ftbm_key] for ftbm_key in ftbm_keys}
+ca_tax_bracket_married = {2*key: ca_tax_bracket[key] for key in ca_tax_bracket}
 
-fed_tax = Tax(fed_tax_bracket, 12550)
-ca_tax = Tax(ca_tax_bracket, 4601)
+fed_tax = Tax(fed_tax_bracket, 12950)
+ca_tax = Tax(ca_tax_bracket, 5202)
 fed_ca_tax = CombineTax([fed_tax, ca_tax])
+fed_tax_married = Tax(fed_tax_bracket_married, 12950*2)
+ca_tax_married = Tax(ca_tax_bracket_married, 5202*2)
+fed_ca_tax_married = CombineTax([fed_tax_married, ca_tax_married])
 fica_tax = Tax({np.inf:0.0765})
 fed_ca_fica_tax = CombineTax([fed_tax, ca_tax, fica_tax])
+fed_ca_fica_tax_married = CombineTax([fed_tax_married, ca_tax_married, fica_tax])
+
