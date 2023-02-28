@@ -82,27 +82,58 @@ class Saver(object):
         return contribution
     
     def GetNetContributions(self):
+        """
+        Returns
+        -------
+        float
+            Net contributions in this account's lifespan
+        """
         return float('{:0.2f}'.format(self._net_contributions))
     
     def GetAccountValue(self):
+        """
+        Returns
+        -------
+        float
+            Current  account value
+        """
         return float('{:0.2f}'.format(self._total_value))
     
     def GetTaxObject(self):
+        """
+        Returns
+        -------
+        Tax
+            tax object associated with account
+        """
         return self._tax
     
-    def GetEmployerContribution(self, income):
-        if self._employer_contribution_rate is None:
-            return 0
-        else:
-            return self._employer_contribution_rate * income
-    
     def SetAPR(self, apr):
+        """set return rate as annual percentage return (APR)
+
+        Parameters
+        ----------
+        apr : float
+            fractional return rate. e.g. 5% annual return corresponds to input of `apr=.05`
+        """
         self._apr = apr
         
     def SetContributionCap(self, contribution_cap):
+        """
+        Parameters
+        ----------
+        contribution_cap : float
+            personal contribution cap to apply to this account
+        """
         self._contribution_cap = contribution_cap
     
     def SetTaxObject(self, tax):
+        """
+        Parameters
+        ----------
+        tax : Tax
+            tax object to associate with account withdrawals
+        """
         self._tax = tax
         
     def SetContribution(self, base_contribution=None, contribution_rate=None):
@@ -124,10 +155,13 @@ class Saver(object):
             self._contribution_rate = contribution_rate
     
     def SetYearlyWithdrawal(self, withdrawal):
+        """
+        Parameters
+        ----------
+        withdrawal : float
+            value to remove from account each year
+        """
         self._yearly_withdrawal = withdrawal
-        
-    # def SetEmployerContributionRate(self, rate=None):
-    #     self._employer_contribution_rate = rate
         
     def Contribute(self, contribution=None, income = None, time_step = 0, **kwargs):
         """
@@ -139,10 +173,22 @@ class Saver(object):
         time_step : int, optional
             time in years to spread contribution over. The default is 1.
 
+        Returns
+        -------
+        float
+            attempted contribution which was above contribution cap.
+            should be a value 0 (if contribution was below the cap) or greater.
+
         """
-        
+        over = 0.0
         if contribution is None:
             contribution = self.GetContribution(income) * max(time_step,1)
+        else:
+            contr_annual = contribution / max(time_step, 1)
+            if contr_annual > self._contribution_cap:
+                over = (contr_annual - self._contribution_cap) * max(time_step, 1)
+                contribution = self._contribution_cap * max(time_step, 1)
+
         contribution += self._additional_contributions(contribution=contribution, income=income, **kwargs) * max(time_step, 1)
         self._net_contributions += contribution
         
@@ -154,7 +200,25 @@ class Saver(object):
                 self._total_value += contribution
                 self.Age(1)
 
+        return over
+
     def Withdraw(self, amount=None, time_step = 0, **kwargs):
+        """Withdraw value amount over specified time
+
+        Parameters
+        ----------
+        amount : float, optional
+            amount to remove from account, by default None.
+            If none, will withdraw amount specified from `self.SetYearlyWithdrawal(amount)`
+        time_step : int, optional
+            time over which amount will be withrawn, by default 0
+        kwargs : arguments to pass to overloaded function _withdraw_tax
+
+        Returns
+        -------
+        float
+            value for use after taxes
+        """
         
         if amount is None:
             amount = self._yearly_withdrawal
@@ -171,6 +235,16 @@ class Saver(object):
         return float('{:0.2f}'.format(amount - tax_amount))
     
     def Age(self, time_step=1):
+        #TODO : implement auto withdrawals and contributions?
+        """Advance age of account by 1 year.
+        Currently just advances age and calculates new value from APR growth.
+        Does NOT currently implement automatic contributions or withdrawals
+
+        Parameters
+        ----------
+        time_step : int, optional
+            years to advance age of account by, by default 1
+        """
         self._account_age += time_step
         self._total_value *= (1+self._apr)**time_step
 
