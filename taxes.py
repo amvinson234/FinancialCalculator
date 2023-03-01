@@ -76,3 +76,7 @@ fica_tax = Tax({np.inf:0.0765})
 fed_ca_fica_tax = CombineTax([fed_tax, ca_tax, fica_tax])
 fed_ca_fica_tax_married = CombineTax([fed_tax_married, ca_tax_married, fica_tax])
 
+capital_gains_bracket = {44625:0.0, 492300:.15, np.inf:.2}
+capital_gains_bracket_married = {89250:0.0, 553850:.15, np.inf:.2}
+capital_gains_tax = Tax(capital_gains_bracket)
+capital_gains_tax_married = Tax(capital_gains_bracket_married)
