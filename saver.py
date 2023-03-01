@@ -202,7 +202,7 @@ class Saver(object):
 
         return over
 
-    def Withdraw(self, amount=None, time_step = 0, **kwargs):
+    def Withdraw(self, amount=None, time_step = 0, tax=False, **kwargs):
         """Withdraw value amount over specified time
 
         Parameters
@@ -212,17 +212,20 @@ class Saver(object):
             If none, will withdraw amount specified from `self.SetYearlyWithdrawal(amount)`
         time_step : int, optional
             time over which amount will be withrawn, by default 0
+        tax : bool, optional
+            whether to apply tax to withrawal. by default False
         kwargs : arguments to pass to overloaded function _withdraw_tax
 
         Returns
         -------
         float
-            value for use after taxes
+            value withdrawn (after taxes if `tax == True`)
         """
         
         if amount is None:
             amount = self._yearly_withdrawal
         
+        amount = min(amount, self._total_value)
         tax_amount = 0
         if time_step == 0:
             self._total_value -= amount
@@ -231,7 +234,10 @@ class Saver(object):
             for i in range(time_step):
                 self._total_value -= amount/time_step
                 self.Age(1)
-                tax_amount += self._withdraw_tax(amount/time_step, **kwargs)            
+                tax_amount += self._withdraw_tax(amount/time_step, **kwargs)
+        if tax is False:
+            tax_amount = 0.0
+        
         return float('{:0.2f}'.format(amount - tax_amount))
     
     def Age(self, time_step=1):
@@ -312,6 +318,28 @@ class TradTaxDeferred(Saver):
         return min(val, self._employer_contribution_cap)
 
 class Roth(Saver):
+    """Roth savings account 
+    Parameters
+    ----------
+    init_value : float, optional
+        initial dollar value in account, by default 0
+    base_contribution : float, optional
+        base contribution value that user will contribute each year, by default 0
+    yearly_withdrawal : float, optional
+        how much value that user will extract from the account each year, by default 0
+    contribution_rate : float, optional
+        contribution rate of user, as a fraction of yearly income, by default 0
+    apr : float, optional
+        rate of growth as fraction of total account value per year, by default 0
+    contribution_cap : float, optional
+        yearly contribution cap, by default None
+    employer_contribution_rate : float, optional
+        emoloyer contribution rate as fraction of user's income, by default None
+    employer_contribution_match : float, optional
+        employer contribution rate as a fraction matching user's contribution
+    employer_contribution_cap : flaot, optional
+        maximum employer contribution value
+    """
     def __init__(self,
                  init_value=0.0,
                  base_contribution=0.0,
@@ -338,16 +366,39 @@ class Roth(Saver):
         return min(val, self._employer_contribution_cap)
     
 class IndividualTaxable(Saver):
+    """Individual Taxable Account Object. Must be overloaded.
+
+    Parameters
+    ----------
+    init_value : float, optional
+        initial dollar value in account, by default 0
+    base_contribution : float, optional
+        base contribution value that user will contribute each year, by default 0
+    yearly_withdrawal : float, optional
+        how much value that user will extract from the account each year, by default 0
+    contribution_rate : float, optional
+        contribution rate of user, as a fraction of yearly income, by default 0
+    apr : float, optional
+        rate of growth as fraction of total account value per year, by default 0
+    tax : Tax, optional
+        tax object which dictates tax rates at different withdrawal amounts, by default None
+    """
     def __init__(self,
                  init_value=0.0,
                  base_contribution=0.0,
                  yearly_withdrawal=0.0,
                  contribution_rate=0.0,
                  apr=0.0,
-                 tax=None
+                 tax=None,
+                 employer_contribution_rate=0.0,
+                 employer_contribution_match=0.0,
+                 employer_contribution_cap=np.inf
                  ):
         self._overloaded = True
         Saver.__init__(self, init_value, base_contribution, yearly_withdrawal, contribution_rate, apr, tax)
+        self._employer_contribution_rate=employer_contribution_rate
+        self._employer_contribution_match=employer_contribution_match
+        self._employer_contribution_cap=employer_contribution_cap
 
     def _withdraw_tax(self, amount):
         #Note, this is an estimate. reality is more complictated if we're dealing with stocks...
@@ -355,9 +406,17 @@ class IndividualTaxable(Saver):
         #We then assume, when withdrawing, we're selling stocks, etc., such that what we're selling gives a fractional gain the same as the fractional gain if we sold everything.
         if self._tax is not None:
             gains = self.GetAccountValue() - self._net_contributions
-            estimated_taxable_amount = gains / self.GetAccountValue() * amount
+            estimated_taxable_amount = gains / max(1,self.GetAccountValue()) * amount
             return max(self._tax.GetTax(estimated_taxable_amount), 0.0)
         return 0.0
+    
+    def _additional_contributions(self, **kwargs):
+        val = 0.0
+        if 'contribution' in kwargs and kwargs['contribution'] is not None:
+            val += self._employer_contribution_match * kwargs['contribution']
+        if 'income' in kwargs and kwargs['income'] is not None:
+            val += self._employer_contribution_rate * kwargs['income']
+        return min(val, self._employer_contribution_cap)
     
 #TODO : joined savings account? e.g. roth 401k plus traditional 401k with shared contribution limit
 
