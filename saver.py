@@ -1,7 +1,12 @@
 import sys
+import warnings
 sys.path.append('..')
 import numpy as np
 import FinancialCalculator as fc
+
+individual_401k_contribution_limit = 22500
+total_401k_contribution_limit = 66000 #individual + employer contribution
+ira_contribution_limit = 6500
 
 class Saver(object):
     """Base Savings Account Object. Must be overloaded.
@@ -26,10 +31,8 @@ class Saver(object):
     def __init__(self, 
                  init_value=0.0,
                  base_contribution=0.0,
-                 yearly_withdrawal=0.0,
                  contribution_rate=0.0,
                  apr=0.0,
-                 tax=None,
                  contribution_cap=np.inf
                  ):
         
@@ -43,10 +46,11 @@ class Saver(object):
         self._account_age = 0
         self._apr = apr
         self._base_contribution = base_contribution
-        self._yearly_withdrawal = yearly_withdrawal
         self._contribution_rate = contribution_rate
-        self._tax = tax
         self._contribution_cap = contribution_cap
+        self._current_contribution = 0 #current contributions for the year
+        self.taxable_withdrawals = 0
+        self.deductable_contributions = 0
 
     def GetValue(self):
         return self._total_value
@@ -154,16 +158,7 @@ class Saver(object):
         if contribution_rate is not None:
             self._contribution_rate = contribution_rate
     
-    def SetYearlyWithdrawal(self, withdrawal):
-        """
-        Parameters
-        ----------
-        withdrawal : float
-            value to remove from account each year
-        """
-        self._yearly_withdrawal = withdrawal
-        
-    def Contribute(self, contribution=None, income = None, time_step = 0, **kwargs):
+    def Contribute(self, contribution=None, income = None, employer=False, **kwargs):
         """
         Parameters
         ----------
@@ -182,27 +177,22 @@ class Saver(object):
         """
         over = 0.0
         if contribution is None:
-            contribution = self.GetContribution(income) * max(time_step,1)
+            contribution = self.GetContribution(income)
         else:
-            contr_annual = contribution / max(time_step, 1)
-            if contr_annual > self._contribution_cap:
-                over = (contr_annual - self._contribution_cap) * max(time_step, 1)
-                contribution = self._contribution_cap * max(time_step, 1)
+            if contribution > (self._contribution_cap-self._current_contribution):
+                over = (contribution - self._contribution_cap + self._current_contribution)
+                contribution = self._contribution_cap
 
-        contribution += self._additional_contributions(contribution=contribution, income=income, **kwargs) * max(time_step, 1)
+        contribution += self._additional_contributions(contribution=contribution, income=income, employer=employer, **kwargs)
         self._net_contributions += contribution
+        self._current_contribution += contribution
+        self._total_value += contribution
         
-        if(time_step == 0):
-            self._total_value += contribution
-        else:
-            contribution *= 1 / time_step
-            for i in range(time_step):
-                self._total_value += contribution
-                self.Age(1)
+        self._udpate_deductable_contributions(contribution, income, employer, **kwargs)
 
         return over
 
-    def Withdraw(self, amount=None, time_step = 0, tax=False, **kwargs):
+    def Withdraw(self, amount, **kwargs):
         """Withdraw value amount over specified time
 
         Parameters
@@ -222,25 +212,13 @@ class Saver(object):
             value withdrawn (after taxes if `tax == True`)
         """
         
-        if amount is None:
-            amount = self._yearly_withdrawal
-        
         amount = min(amount, self._total_value)
-        tax_amount = 0
-        if time_step == 0:
-            self._total_value -= amount
-            tax_amount += self._withdraw_tax(amount, **kwargs) 
-        else:        
-            for i in range(time_step):
-                self._total_value -= amount/time_step
-                self.Age(1)
-                tax_amount += self._withdraw_tax(amount/time_step, **kwargs)
-        if tax is False:
-            tax_amount = 0.0
-        
-        return float('{:0.2f}'.format(amount - tax_amount))
-    
-    def Age(self, time_step=1):
+        self._udpate_taxable_withdrawals(amount, **kwargs)
+
+        #TODO return anything?
+        self._total_value -= amount
+            
+    def Age(self):
         #TODO : implement auto withdrawals and contributions?
         """Advance age of account by 1 year.
         Currently just advances age and calculates new value from APR growth.
@@ -251,14 +229,151 @@ class Saver(object):
         time_step : int, optional
             years to advance age of account by, by default 1
         """
-        self._account_age += time_step
-        self._total_value *= (1+self._apr)**time_step
+        self._account_age += 1
+        self._total_value *= (1+self._apr)
+        self._current_contribution = 0
+        self.deductable_contributions = 0
+        self.taxable_withdrawals = 0
 
-    def _withdraw_tax(self, amount, **kwargs):
-        return 0.0
+        self._age()
 
     def _additional_contributions(self, **kwargs):
         return 0.0
+    
+    def _udpate_taxable_withdrawals(self, amount, **kwargs):
+        pass
+
+    def _udpate_deductable_contributions(self, contribution, income, employer, **kwargs):
+        pass
+    
+    def _age(self):
+        pass
+
+class Saver401k(Saver):
+    def __init__(self, 
+                 init_value_trad = 0,
+                 init_value_roth = 0,
+                 init_afterTax = 0,
+                 apr = 0.0,
+                 individual_contribution_cap = individual_401k_contribution_limit,
+                 total_contribution_cap = total_401k_contribution_limit,
+                 employer_contribution_rate = 0.0,
+                 employer_contribution_match = 0.0,
+                 employer_contribution_cap = total_401k_contribution_limit - individual_401k_contribution_limit
+                 ):
+        self._overloaded = True  
+
+        #TODO :
+        # update base saver values  while trad and roth are being updated
+        Saver.__init__(self,
+                       init_value=init_value_trad+init_afterTax+init_afterTax,
+                       apr=apr
+                      )
+        self._trad = TradTaxDeferred(init_value=init_value_trad,
+                                     apr=apr,
+                                     employer_contribution_rate=employer_contribution_rate,
+                                     employer_contribution_match=employer_contribution_match,
+                                     employer_contribution_cap=employer_contribution_cap)
+        self._roth = Roth(init_value=init_value_roth, 
+                          apr=apr)
+        self._afterTax = IndividualTaxable(init_value=init_afterTax, 
+                               apr=apr)
+        self.total_contribution_cap = total_contribution_cap
+        self.individual_contribution_cap = individual_contribution_cap
+        self.employer_contribution_cap = employer_contribution_cap
+
+        self._current_contribution_individual = 0
+        self._current_contribution_employer = 0
+        self._current_contribution = 0
+
+    def ContributeTraditional(self, contribution=None, income=None, employer=False):
+        contr_limit_warning = 'Attempted to contribute more than contributions limits allow. Automatically lowering contribution to be equal to max allowable.'
+        # if self._current_contribution + contribution > self.total_contribution_cap:
+        #     warnings.warn(contr_limit_warning)
+        #     contribution = self._current_contribution - self._current_contribution
+        # if employer:
+        #     if contribution is not None and self._current_contribution_employer + contribution > self.employer_contribution_cap:
+        #         warnings.warn(contr_limit_warning)
+        #         contribution = self.employer_contribution_cap - self._current_contribution_employer
+        # else:
+        #     if self._current_contribution_individual + contribution > self.individual_contribution_cap:
+        #         warnings.warn(contr_limit_warning)
+        #         contribution = self.individual_contribution_cap - self._current_contribution_individual
+
+        self._trad.Contribute(contribution, income=income, employer=employer)
+        self._current_contribution_individual = self._trad._current_contribution_individual + self._roth._current_contribution + self._afterTax._current_contribution
+        self._current_contribution_employer = self._trad._current_contribution_employer
+        self._current_contribution = self._trad._current_contribution + self._roth._current_contribution + self._afterTax._current_contribution
+        self._net_contributions = self._trad._net_contributions + self._roth._net_contributions + self._afterTax._net_contributions
+        self.deductable_contributions = self._trad.deductable_contributions + self._roth.deductable_contributions + self._afterTax.deductable_contributions
+
+    def ContributeRoth(self, contribution, income=None, employer=False):
+        # contr_limit_warning = 'Attempted to contribute more than contributions limits allow. Automatically lowering contribution to be equal to max allowable.'
+        # if self._current_contribution + contribution > self.total_contribution_cap:
+        #     warnings.warn(contr_limit_warning)
+        #     contribution = self._current_contribution - self._current_contribution
+        # self._current_contribution_individual += contribution
+        # self._current_contribution += contribution
+        self._roth.Contribute(contribution, income=income, employer=employer)
+        self._current_contribution_individual = self._trad._current_contribution_individual + self._roth._current_contribution + self._afterTax._current_contribution
+        self._current_contribution_employer = self._trad._current_contribution_employer
+        self._current_contribution = self._trad._current_contribution + self._roth._current_contribution + self._afterTax._current_contribution
+        self._net_contributions = self._trad._net_contributions + self._roth._net_contributions + self._afterTax._net_contributions
+        self.deductable_contributions = self._trad.deductable_contributions + self._roth.deductable_contributions + self._afterTax.deductable_contributions
+
+    def WithdrawTraditional(self, amount=None, **kwargs):
+        self._trad.Withdraw(amount, **kwargs)
+        self._total_value = self._trad._total_value + self._roth._total_value + self._afterTax._total_value
+        self.taxable_withdrawals = self._roth.taxable_withdrawals + self._afterTax.taxable_withdrawals + self._trad.taxable_withdrawals
+    
+    def WithdrawRoth(self, amount, **kwargs):
+        self._roth.Withdraw(amount, **kwargs)
+        self.taxable_withdrawals = self._roth.taxable_withdrawals + self._afterTax.taxable_withdrawals + self._trad.taxable_withdrawals
+
+    def Contribute(self, contribution=None, income=None, employer=False, **kwargs):
+        #TODO : this should be a _contribute() class, and super class shouldn't do much, but call _contribute()
+        #       same for withdraw
+        rta = ['roth', 'traditional', 'aftertax']
+        cnt = 0
+        for el in rta:
+            if el in kwargs.keys() and kwargs[acct_type] == True:
+                acct_type = el
+                cnt+=1
+        if cnt > 1:
+            raise RuntimeError('Only specify only one account type, traditional, roth, or aftertax')
+        if cnt < 1:
+            raise RuntimeError('Must specify a boolean parameter roth, traditional, or aftertax')
+        
+        if acct_type == 'roth':
+            self.ContributeRoth(contribution, income, employer)
+        if acct_type == 'traditional':
+            self.ContributeTraditional(contribution, income, employer)
+        if acct_type == 'aftertax':
+            raise RuntimeError('aftertax not yet supported.')
+        
+    def Withdraw(self, amount=None, **kwargs):
+        rta = ['roth', 'traditional', 'aftertax']
+        cnt = 0
+        for el in rta:
+            if el in kwargs.keys() and kwargs[acct_type] == True:
+                acct_type = el
+                cnt+=1
+        if cnt > 1:
+            raise RuntimeError('Only specify only one account type, traditional, roth, or aftertax')
+        if cnt < 1:
+            raise RuntimeError('Must specify a boolean parameter roth, traditional, or aftertax')
+        
+        if acct_type == 'roth':
+            self.WithdrawRoth(amount)
+        if acct_type == 'traditional':
+            self.WithdrawTraditional(amount)
+        if acct_type == 'aftertax':
+            raise RuntimeError('aftertax not yet supported.')
+        
+    def _age(self):
+        self._roth.Age()
+        self._trad.Age()
+        self._afterTax.Age()
     
 class TradTaxDeferred(Saver):
     """Traditional tax deferred savings account (e.g. Traditional 401k)
@@ -289,33 +404,48 @@ class TradTaxDeferred(Saver):
     def __init__(self,
                  init_value=0.0,
                  base_contribution=0.0,
-                 yearly_withdrawal=0.0,
                  contribution_rate=0.0,
                  apr=0.0,
-                 tax=None,
-                 contribution_cap=np.inf,
                  employer_contribution_rate=0.0,
                  employer_contribution_match=0.0,
                  employer_contribution_cap=np.inf
                  ):
         self._overloaded = True
-        Saver.__init__(self, init_value, base_contribution, yearly_withdrawal, contribution_rate, apr, tax, contribution_cap)
+        Saver.__init__(self, init_value, base_contribution, contribution_rate, apr)
         self._employer_contribution_rate=employer_contribution_rate
         self._employer_contribution_match=employer_contribution_match
         self._employer_contribution_cap=employer_contribution_cap
+        self.individual_contribution_cap = individual_401k_contribution_limit
+        self.total_contribution_cap = individual_401k_contribution_limit
+        self._current_contribution_individual = 0
+        self._current_contribution_employer = 0
 
-    def _withdraw_tax(self, amount):
-        if self._tax is not None:
-            return self._tax.GetTax(amount)
-        return 0
-
-    def _additional_contributions(self, **kwargs):
+    def _additional_contributions(self, contribution, income, employer, **kwargs):
         val = 0.0
-        if 'contribution' in kwargs:
-            val += self._employer_contribution_rate * kwargs['contribution']
-        if 'income' in kwargs:
-            val += self._employer_contribution_match * kwargs['income']
-        return min(val, self._employer_contribution_cap)
+        if employer:
+            if income is not None:
+                val += self._employer_contribution_rate * income
+            val += self._employer_contribution_match * contribution
+            val = max(0,min(val, self._employer_contribution_cap-self._current_contribution_employer))
+            self._current_contribution_employer += val
+        else:
+            ind_contr = min(contribution, self.individual_contribution_cap-self._current_contribution_individual)
+            employer_contr = self._employer_contribution_match * contribution
+            employer_contr = max(0,min(val, self._employer_contribution_cap-self._current_contribution_employer))
+            self._current_contribution_employer += employer_contr
+            self._current_contribution_individual += ind_contr
+            val += employer_contr - (contribution-ind_contr)
+        return val
+    
+    def _udpate_taxable_withdrawals(self, amount, **kwargs):
+        self.taxable_withdrawals += amount
+
+    def _udpate_deductable_contributions(self, contribution, income, employer, **kwargs):
+        self.deductable_contributions = self._current_contribution_individual
+
+    def _age(self):
+        self._current_contribution_individual = 0
+        self._current_contribution_employer = 0
 
 class Roth(Saver):
     """Roth savings account 
@@ -343,7 +473,6 @@ class Roth(Saver):
     def __init__(self,
                  init_value=0.0,
                  base_contribution=0.0,
-                 yearly_withdrawal=0.0,
                  contribution_rate=0.0,
                  apr=0.0,
                  contribution_cap=np.inf,
@@ -352,7 +481,7 @@ class Roth(Saver):
                  employer_contribution_cap=np.inf
                  ):
         self._overloaded = True
-        Saver.__init__(self, init_value, base_contribution, yearly_withdrawal, contribution_rate, apr, None, contribution_cap)
+        Saver.__init__(self, init_value, base_contribution, contribution_rate, apr, contribution_cap)
         self._employer_contribution_rate=employer_contribution_rate
         self._employer_contribution_match=employer_contribution_match
         self._employer_contribution_cap=employer_contribution_cap
@@ -364,6 +493,10 @@ class Roth(Saver):
         if 'income' in kwargs and kwargs['income'] is not None:
             val += self._employer_contribution_rate * kwargs['income']
         return min(val, self._employer_contribution_cap)
+
+    def _age(self):
+        self._current_contribution_individual = 0
+        self._current_contribution_employer = 0
     
 class IndividualTaxable(Saver):
     """Individual Taxable Account Object. Must be overloaded.
@@ -389,26 +522,15 @@ class IndividualTaxable(Saver):
                  yearly_withdrawal=0.0,
                  contribution_rate=0.0,
                  apr=0.0,
-                 tax=None,
                  employer_contribution_rate=0.0,
                  employer_contribution_match=0.0,
                  employer_contribution_cap=np.inf
                  ):
         self._overloaded = True
-        Saver.__init__(self, init_value, base_contribution, yearly_withdrawal, contribution_rate, apr, tax)
+        Saver.__init__(self, init_value, base_contribution, yearly_withdrawal, contribution_rate, apr)
         self._employer_contribution_rate=employer_contribution_rate
         self._employer_contribution_match=employer_contribution_match
         self._employer_contribution_cap=employer_contribution_cap
-
-    def _withdraw_tax(self, amount):
-        #Note, this is an estimate. reality is more complictated if we're dealing with stocks...
-        #Essentially, what we will assume is that we're only taxed on gains when withdrawing money (in reality, we may be selling and buying before ever truly liquidating).
-        #We then assume, when withdrawing, we're selling stocks, etc., such that what we're selling gives a fractional gain the same as the fractional gain if we sold everything.
-        if self._tax is not None:
-            gains = self.GetAccountValue() - self._net_contributions
-            estimated_taxable_amount = gains / max(1,self.GetAccountValue()) * amount
-            return max(self._tax.GetTax(estimated_taxable_amount), 0.0)
-        return 0.0
     
     def _additional_contributions(self, **kwargs):
         val = 0.0
@@ -418,7 +540,9 @@ class IndividualTaxable(Saver):
             val += self._employer_contribution_rate * kwargs['income']
         return min(val, self._employer_contribution_cap)
     
-#TODO : joined savings account? e.g. roth 401k plus traditional 401k with shared contribution limit
+    def _age(self):
+        self._current_contribution_individual = 0
+        self._current_contribution_employer = 0
 
 if __name__ == '__main__':
     roth = Roth(0, base_contribution=6500+8000, yearly_withdrawal=0.0, contribution_rate=0.0,
