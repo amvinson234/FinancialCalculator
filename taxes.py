@@ -5,7 +5,7 @@ class TaxBucket(object):
         self._brackets_rate = None
         self._deduction = deduction
         self._income_sources = []
-        self._taxable_income = 0
+        self.taxable_income = 0
         self._deduction_sources = []
         
         self.SetStandardDeduction(deduction)
@@ -20,10 +20,10 @@ class TaxBucket(object):
         else:
             self._deduction = deduction
         
-    def GetTax(self, ordinary_income=0, deduction=None):
+    def GetTax(self, income=0, deduction=None):
         if deduction is None:
             deduction = self._deduction
-        amount = ordinary_income
+        amount = income + self.taxable_income
         amount -= deduction
         for income_acct in self._income_sources:
             amount += income_acct.taxable_withdrawals
@@ -46,6 +46,9 @@ class TaxBucket(object):
         tax = self.GetTax(amount)
         return tax / amount
     
+    def AddTaxableIncome(self, amount):
+        self.taxable_income += amount
+
     def AddTaxableIncomeSources(self, accounts):
         if not isinstance(accounts, list):
             accounts = [accounts]

@@ -215,8 +215,8 @@ class Saver(object):
         amount = min(amount, self._total_value)
         self._udpate_taxable_withdrawals(amount, **kwargs)
 
-        #TODO return anything?
         self._total_value -= amount
+        return amount
             
     def Age(self):
         #TODO : implement auto withdrawals and contributions?
@@ -341,14 +341,17 @@ class Saver401k(Saver):
                 cnt+=1
         if cnt > 1:
             raise RuntimeError('Only specify only one account type, traditional, roth, or aftertax')
-        if cnt < 1:
-            raise RuntimeError('Must specify a boolean parameter roth, traditional, or aftertax')
-        
-        if acct_type == 'roth':
+        if cnt < 1 and contribution is None:
             self.ContributeRoth(contribution, income, employer)
-        if acct_type == 'traditional':
             self.ContributeTraditional(contribution, income, employer)
-        if acct_type == 'aftertax':
+            #TODO : add after tax contribution 
+        elif cnt < 1:
+            raise RuntimeError('Must specify a boolean parameter roth, traditional, or aftertax')
+        elif acct_type == 'roth':
+            self.ContributeRoth(contribution, income, employer)
+        elif acct_type == 'traditional':
+            self.ContributeTraditional(contribution, income, employer)
+        elif acct_type == 'aftertax':
             raise RuntimeError('aftertax not yet supported.')
         
     def Withdraw(self, amount=None, **kwargs):
@@ -543,6 +546,9 @@ class IndividualTaxable(Saver):
     def _age(self):
         self._current_contribution_individual = 0
         self._current_contribution_employer = 0
+
+    def _udpate_taxable_withdrawals(self, amount, **kwargs):
+        self.taxable_withdrawals += amount
 
 if __name__ == '__main__':
     roth = Roth(0, base_contribution=6500+8000, yearly_withdrawal=0.0, contribution_rate=0.0,

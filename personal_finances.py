@@ -5,15 +5,18 @@ import FinancialCalculator as fc
 
 class PersonalFinances(object):
     def __init__(self, 
-                 accounts=[],
+                 accounts={},
                  initial_income = 0, 
-                 initial_expense = 0, 
-                 income_tax=None, 
-                 fica_taxes = None, 
+                 initial_expense = 0,
+                 initial_standard_value = 0,
+                 standard_apr=0.0,
+                 income_tax_bucket = [],
+                 fica_tax_bucket = None,
+                 account_tax_buckets = [],
                  age = 18, 
                  income_growth = 0, 
                  expense_growth = 0,
-                 standard_apr = 0):
+                 married=False):
         """
         
         Parameters
@@ -43,21 +46,31 @@ class PersonalFinances(object):
         self._accounts = {}
         self._income_tax = None
         self._fica = None
+        self._married = married
+        self._tax_buckets = account_tax_buckets
+        self._income_tax_bucket = None
+        self._fica_tax_bucket = None
 
-        self.SetIncomeTax(income_tax)
-        self.SetFICA(fica_taxes)
         self.SetExpenses(initial_expense)
         self.SetIncome(initial_income)
         self.SetIncomeGrowthRate(income_growth)
         self.SetExpenseGrowthRate(expense_growth)
-
-        self._agi = self._income
         
         for key in accounts:
             self.AddAccount(key, accounts[key])
             
         ##always have a 'standard' account in which leftover expenses can accumulate
-        account = fc.IndividualTaxable(apr=standard_apr, tax=fc.fed_ca_tax)
+        if income_tax_bucket is not None:
+            for bucket in income_tax_bucket:
+                bucket.taxable_income = initial_income
+            self._income_tax_bucket = income_tax_bucket
+            self._tax_buckets.extend(income_tax_bucket)
+        if fica_tax_bucket is not None:
+            fica_tax_bucket.taxable_income = initial_income
+            self._fica_tax_bucket = fica_tax_bucket
+            self._tax_buckets.append(fica_tax_bucket)
+            
+        account = fc.IndividualTaxable(initial_standard_value, apr=standard_apr)
         self.AddAccount('standard', account)
         
     def GetNetWorth(self):
@@ -127,35 +140,44 @@ class PersonalFinances(object):
             
     def Age(self, time_step=1):
         self._age += time_step
+        
         for i in range(max(time_step,1)):
-            contribution_deductions = 0
             self.Contribute('standard', self._income)
             for key in self._accounts:
                 if self._retired:
                     self._income = 0
                     if key != 'standard':
-                        withdraw = self.Withdraw(key)
+                        withdraw = self._accounts[key].Withdraw(self._accounts[key].GetAccountValue()*0.04) #TODO : make 4% withdraw flexible
                         self.Contribute('standard',withdraw)
-                        self._accounts[key].Age(min(1,time_step))
-                    
                 else:     
                     if key != 'standard':
                         personal_contribution = self._accounts[key].GetContribution(self._income)
                         #employer_contribution = self._accounts[key].GetEmployerContribution(self._income)
                         self.Withdraw('standard', personal_contribution)
                         self.Contribute(key, personal_contribution, self._income)
-                        self._accounts[key].Age(min(1,time_step))
-                        if isinstance(self._accounts[key], fc.TradTaxDeferred):
-                            contribution_deductions += personal_contribution
-        
-            self._expenses *= (1+self._expense_growth_rate)
-            self._income *= (1+self._income_growth_rate)
+                self._accounts[key].Age()
+
             self.Withdraw('standard', self._expenses)
-            taxes = self._income_tax.GetTax(self._income-contribution_deductions) \
-                  + self._fica.GetTax(self._income)
-            self.Withdraw('standard',taxes)
-            self._accounts['standard'].Age(min(1,time_step))
-                
+            self.ApplyTax()
+            
+    def GetTax(self):
+        taxes = 0
+        if self._income_tax_bucket is not None:
+            for bucket in self._income_tax_bucket:
+                bucket.taxable_income = self._income
+        if self._fica_tax_bucket is not None:
+            self._fica_tax_bucket.taxable_income = self._income
+
+        for tax_bucket in self._tax_buckets:
+            taxes += tax_bucket.GetTax() 
+
+        return taxes
+    
+    def ApplyTax(self):
+        taxes = self.GetTax()
+        self.Withdraw('standard',taxes)
+        return taxes
+
     def ContributeToAll(self, amount=None, income=None):
         for key in self._accounts:
             self.Contribute(key, amount, income=income)
@@ -164,13 +186,15 @@ class PersonalFinances(object):
         for key in self._accounts:
             self.Withdraw(key, amount)
     
-    def WithdrawAll(self, time_step=1, tax=False):
+    def WithdrawAll(self):
         result = 0
         for key in self._accounts:
             while(self._accounts[key].GetAccountValue() > 0):
                 amount = self._accounts[key].GetAccountValue()
-                result += self.Withdraw(key, np.inf, tax=tax)
-        return result
+                result += self.Withdraw(key, np.inf)
+        tax = self.GetTax()
+        self.ApplyTax()
+        return result - tax
     
     def Contribute(self, account_key, amount = None, income=None):
         self._accounts[account_key].Contribute(amount, income)
@@ -179,30 +203,53 @@ class PersonalFinances(object):
         return self._accounts[account_key].Withdraw(amount, tax=tax)
 
 if __name__ == '__main__':
-    roth = fc.Roth(0, base_contribution=6500+8000, yearly_withdrawal=0.0, contribution_rate=0.0,
-                apr=.05, contribution_cap=6500+8000)
+    roth = fc.Roth(init_value=22000.0,
+                 base_contribution=6500.,
+                 contribution_rate=0.0,
+                 apr=0.05,
+                 employer_contribution_rate=0.0,
+                 employer_contribution_match=0.0,
+                 employer_contribution_cap=np.inf)
+    
+    saver401k =  fc.Saver401k(init_value_trad = 15000,
+                 init_value_roth = 15000,
+                 init_afterTax = 0,
+                 apr = 0.05,
+                 individual_contribution_cap = fc.individual_401k_contribution_limit,
+                 total_contribution_cap = fc.total_401k_contribution_limit,
+                 employer_contribution_rate = 0.05,
+                 employer_contribution_match = 0.0,
+                 employer_contribution_cap = fc.total_401k_contribution_limit - fc.individual_401k_contribution_limit)
 
-    trad = fc.TradTaxDeferred(0, base_contribution=14500, yearly_withdrawal=0.0, contribution_rate=0.0,
-                apr=.05, employer_contribution_rate=.05, tax=fc.fed_ca_tax, contribution_cap=14500)
+    accounts = {'roth':roth, '401k':saver401k}
 
-    indtax = fc.IndividualTaxable(0, 12000, 0, 0, 0.05, tax=fc.capital_gains_tax)
+    income_init = 133000
+    fc.fed_tax.AddTaxableIncomeSources([saver401k])
+    fc.ca_tax.AddTaxableIncomeSources([saver401k])
+    fc.fed_tax.AddTaxableIncome(income_init)
+    fc.ca_tax.AddTaxableIncome(income_init)
+    fc.fed_tax.AddDeductionSources([saver401k])
+    fc.ca_tax.AddDeductionSources([saver401k])
 
-    accounts = {'roth':roth, 'trad':trad, 'indtax':indtax}
+    fc.fica_tax.AddTaxableIncome(income_init)
+
+    brackets = [fc.fed_tax, fc.ca_tax, fc.fica_tax]
 
     person = PersonalFinances(accounts,
-                              initial_income=125000,
+                              initial_income=income_init,
+                              initial_standard_value=18000,
                               initial_expense=54000,
-                              income_tax=fc.fed_ca_tax,
-                              fica_taxes=fc.fica_tax,
-                              age=30,
-                              income_growth=.025,
-                              expense_growth=.02,
-                              standard_apr=.05)
+                              income_tax_bucket=[fc.fed_tax, fc.ca_tax],
+                              fica_tax_bucket=fc.fica_tax,
+                              age=31,
+                              income_growth=.02,
+                              expense_growth=.0175,
+                              standard_apr=.01)
     
     person.Age(15)
     print(person.GetNetWorth())
     
-    print(roth.GetAccountValue(), trad.GetAccountValue(), indtax.GetAccountValue(), person.GetAccount('standard').GetAccountValue())
+    print(roth.GetAccountValue(), saver401k.GetAccountValue(), person.GetAccount('standard').GetAccountValue())
 
-    print(person.WithdrawAll(tax=True))
+    #print(person.WithdrawAll())
     print(person.GetIncome())
